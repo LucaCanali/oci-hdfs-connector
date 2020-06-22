@@ -8,6 +8,8 @@ package com.oracle.bmc.hdfs.store;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.management.ManagementFactory;
+import java.lang.management.ThreadMXBean;
 
 import com.oracle.bmc.hdfs.util.FSStreamUtils;
 import org.apache.hadoop.fs.FSExceptionMessages;
@@ -52,6 +54,10 @@ abstract class BmcFSInputStream extends FSInputStream {
     private long currentPosition = 0;
     private boolean closed = false;
 
+    private final ThreadMXBean threadMXBean = ManagementFactory.getThreadMXBean();
+    private final boolean IsCurrentThreadCPUTimeSupported =
+            threadMXBean.isCurrentThreadCpuTimeSupported();
+
     @Override
     public long getPos() throws IOException {
         return this.currentPosition;
@@ -75,7 +81,21 @@ abstract class BmcFSInputStream extends FSInputStream {
                     "Cannot seek to " + position + " (file size : " + this.status.getLen() + ")");
         }
 
+        long startTime = System.nanoTime();
+        long startCPUTime = 0L;
+        if (IsCurrentThreadCPUTimeSupported) {
+            startCPUTime = threadMXBean.getCurrentThreadCpuTime();
+        }
+
         this.currentPosition = this.doSeek(position);
+
+        long elapsedTimeMicrosec = (System.nanoTime() - startTime) / 1000L;
+        BmcTimeInstrumentation.incrementTimeElapsedSeekOps(elapsedTimeMicrosec);
+        if (IsCurrentThreadCPUTimeSupported) {
+            long deltaCPUTimeMicrosec = (threadMXBean.getCurrentThreadCpuTime() - startCPUTime) / 1000L;
+            BmcTimeInstrumentation.incrementCPUTimeDuringSeek(deltaCPUTimeMicrosec);
+        }
+
         LOG.debug("Requested seek to {}, ended at position {}", position, this.currentPosition);
     }
 
@@ -108,10 +128,25 @@ abstract class BmcFSInputStream extends FSInputStream {
     public int read() throws IOException {
         this.validateState(this.currentPosition);
 
+        long startTime = System.nanoTime();
+        long startCPUTime = 0L;
+        if (IsCurrentThreadCPUTimeSupported) {
+            startCPUTime = threadMXBean.getCurrentThreadCpuTime();
+        }
+
         final int byteRead = this.sourceInputStream.read();
+
+        long elapsedTimeMicrosec = (System.nanoTime() - startTime) / 1000L;
+        BmcTimeInstrumentation.incrementTimeElapsedReadOps(elapsedTimeMicrosec);
+        if (IsCurrentThreadCPUTimeSupported) {
+            long deltaCPUTimeMicrosec = (threadMXBean.getCurrentThreadCpuTime() - startCPUTime) / 1000L;
+            BmcTimeInstrumentation.incrementCPUTimeDuringRead(deltaCPUTimeMicrosec);
+        }
+
         if (byteRead != EOF) {
             this.currentPosition++;
             this.statistics.incrementBytesRead(1L);
+            BmcTimeInstrumentation.incrementBytesRead(1L);
         }
         return byteRead;
     }
@@ -120,10 +155,25 @@ abstract class BmcFSInputStream extends FSInputStream {
     public int read(final byte[] b, final int off, final int len) throws IOException {
         this.validateState(this.currentPosition);
 
+        long startTime = System.nanoTime();
+        long startCPUTime = 0L;
+        if (IsCurrentThreadCPUTimeSupported) {
+            startCPUTime = threadMXBean.getCurrentThreadCpuTime();
+        }
+
         final int bytesRead = this.sourceInputStream.read(b, off, len);
+
+        long elapsedTimeMicrosec = (System.nanoTime() - startTime) / 1000L;
+        BmcTimeInstrumentation.incrementTimeElapsedReadOps(elapsedTimeMicrosec);
+        if (IsCurrentThreadCPUTimeSupported) {
+            long deltaCPUTimeMicrosec = (threadMXBean.getCurrentThreadCpuTime() - startCPUTime) / 1000L;
+            BmcTimeInstrumentation.incrementCPUTimeDuringRead(deltaCPUTimeMicrosec);
+        }
+
         if (bytesRead != EOF) {
             this.currentPosition += bytesRead;
             this.statistics.incrementBytesRead(bytesRead);
+            BmcTimeInstrumentation.incrementBytesRead((long) bytesRead);
         }
         return bytesRead;
     }
